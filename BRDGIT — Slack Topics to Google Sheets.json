@@ -1,0 +1,621 @@
+{
+  "name": "BRDGIT \u2014 Slack Topics to Google Sheets",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "hourly-trigger-001",
+      "name": "Hourly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Topics",
+          "cachedResultName": "Topics"
+        },
+        "options": {}
+      },
+      "id": "sheets-read-existing-001",
+      "name": "Get Existing Topics for Dedup",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        464,
+        -128
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "channel",
+        "operation": "history",
+        "channelId": {
+          "__rl": true,
+          "value": "YOUR_SLACK_CHANNEL_ID",
+          "mode": "id"
+        },
+        "limit": 100,
+        "filters": {
+          "inclusive": true,
+          "oldest": "={{ $now.minus({ hours: 2 }).toISO() }}"
+        }
+      },
+      "id": "slack-history-001",
+      "name": "Get Recent Slack Messages",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        464,
+        80
+      ],
+      "webhookId": "YOUR_WEBHOOK_ID",
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack n8n Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format & dedupe Slack messages from #ai-roundup\n// Input: Slack messages (channel:history) for the last ~2 hours\n// Cross-ref: existing topics from the Topics sheet (for dedup)\n// Output: only NEW Jarvis-authored topics, ready to append\n\nconst messages = $input.all();\n\n// Build a Set of existing topic strings (lowercased + trimmed) for dedup\nconst existing = $('Get Existing Topics for Dedup').all()\n  .map(row => String(row.json['Topic'] || '').trim().toLowerCase())\n  .filter(t => t.length > 0);\nconst seen = new Set(existing);\n\nconst today = new Date().toISOString().split('T')[0];\nconst out = [];\n\nfor (const item of messages) {\n  const msg = item.json;\n\n  // Identify Jarvis as author. Slack bot messages may carry the bot name\n  // in either msg.username (Incoming Webhook style) or msg.bot_profile.name\n  // (chat.postMessage from a real bot user).\n  const author = msg.username || msg.bot_profile?.name || '';\n  if (author !== 'Jarvis') continue;\n\n  const text = msg.text || '';\n  if (!text || !text.trim()) continue;\n\n  // Strip Slack formatting\n  let topic = text\n    .replace(/<@[A-Z0-9]+>/g, '')              // user mentions\n    .replace(/<#[A-Z0-9]+\\|[^>]+>/g, '')       // channel mentions\n    .replace(/<([^|>]+)\\|([^>]+)>/g, '$2')     // <url|title> -> title\n    .replace(/<(https?:[^>]+)>/g, '$1')        // bare <url>\n    .replace(/\\n+/g, ' ')                      // flatten newlines\n    .trim();\n\n  if (topic.length < 10) continue;\n  if (topic.length > 500) topic = topic.substring(0, 497) + '...';\n\n  // Dedup against the sheet AND within this run\n  const key = topic.toLowerCase();\n  if (seen.has(key)) continue;\n  seen.add(key);\n\n  out.push({\n    json: {\n      topic,\n      dateAdded: today,\n      source: 'Slack'\n    }\n  });\n}\n\nreturn out;"
+      },
+      "id": "format-topic-001",
+      "name": "Format & Dedupe Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Topics",
+          "cachedResultName": "Topics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Topic": "={{ $json.topic }}",
+            "Last Used": "",
+            "Date Added": "={{ $json.dateAdded }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Used",
+              "displayName": "Last Used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date Added",
+              "displayName": "Date Added",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "append-to-sheet-001",
+      "name": "Add Topic to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        912,
+        80
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "dbf239d0-8e64-432b-a24c-b9ad4a78ee9e",
+      "name": "Daily at 2am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Topics",
+          "cachedResultName": "Topics"
+        },
+        "options": {}
+      },
+      "id": "e93895f2-05a0-41b6-9dba-4ebe99d37e64",
+      "name": "Get All Topics",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        416
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Find topics where Date Added is older than 7 days, then delete them \u2014\n// used AND unused alike. Used topics are kept long enough to publish, then\n// cleaned up so the sheet doesn't bloat. Sort descending by row number so\n// we delete from the bottom up (prevents row shifting from breaking subsequent deletes).\n\nconst rows = $input.all();\nconst now = new Date();\nconst sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\nconst toDelete = rows\n  .filter(row => {\n    const dateAdded = row.json['Date Added'];\n\n    // Skip rows without a parseable Date Added (e.g. manually added without metadata)\n    if (!dateAdded || String(dateAdded).trim() === '') return false;\n\n    const addedDate = new Date(dateAdded);\n    if (isNaN(addedDate.getTime())) return false;\n\n    return addedDate < sevenDaysAgo;\n  })\n  .sort((a, b) => {\n    const rowA = a.json['row_number'] || a.json['_rowNumber'] || 0;\n    const rowB = b.json['row_number'] || b.json['_rowNumber'] || 0;\n    return rowB - rowA; // descending\n  });\n\n// CRITICAL: return an empty array (not a placeholder item) when nothing's expired.\n// An empty array makes the downstream Delete node not run at all. A placeholder\n// item would push the Delete node into a Bad Request (\"can't delete all rows\")\n// because rowNumber would be undefined.\nreturn toDelete.map(row => ({\n  json: {\n    rowNumber: row.json['row_number'] || row.json['_rowNumber'],\n    topic: row.json['Topic'],\n    dateAdded: row.json['Date Added'],\n    lastUsed: row.json['Last Used'] || null\n  }\n}));"
+      },
+      "id": "a032572c-f8a0-4b72-93c4-e14d0eaa8f4f",
+      "name": "Find Expired Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Topics",
+          "cachedResultName": "Topics"
+        },
+        "startIndex": "={{ $json.rowNumber }}"
+      },
+      "id": "56eec684-f0a4-4533-afc2-5f814daad9c4",
+      "name": "Delete Expired Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        928,
+        416
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## BRDGIT \u2014 Slack Topics to Google Sheets\n\n**Three flows in this workflow.** All feed the same Topics tab in the BRDGIT topics sheet.\n\n### 1) Hourly Ingestion from Slack (top row)\n- Hourly Trigger fires at the top of every hour\n- Reads existing topics from the sheet (for dedup, branched off the trigger)\n- Pulls Jarvis's recent messages from #ai-roundup (last 2 hours)\n- Filters to Jarvis-authored, cleans Slack formatting\n- Skips any topic already in the sheet (case-insensitive)\n- Appends new topics to the Topics tab\n\n**Why polling instead of Slack Trigger:**\nThe Slack Trigger has limitations with bot-authored messages and didn't reliably fire for Jarvis posts. Polling channel:history is bulletproof \u2014 works for bot, webhook, app, and human messages alike.\n\n### 2) Daily Cleanup (middle row)\nRuns at 2am. Removes topics that are unused (blank Last Used) AND have a Date Added older than 7 days. Keeps the sheet trimmed so stale ideas don't linger.\n\n### 3) AI Topic Generator (bottom row, every 3 days at 9am)\nBackup topic source for when Slack #ai-roundup is quiet. Runs on a 72-hour interval.\n\n- Schedule Trigger fires every 3 days at 9am\n- Reads existing topics from the sheet (for dedup, branched off the trigger)\n- **AI Topic Agent** (Claude Sonnet 4.5) generates 5\u201310 newsletter-worthy topic hooks at the intersection of software development + AI consulting\n- Agent calls the `Search in Tavily (AI Gen)` tool 2\u20134 times to ground topics in current trends (recent announcements, framework releases, surprising data, shifts in how engineering teams work)\n- Prompt bans generic takes (\"AI is transforming everything\", \"5 ways AI helps developers\") and demands specificity + a defendable angle\n- **Parse & Dedupe AI Topics** parses the JSON output, drops anything that's already in the sheet (case-insensitive), and outputs new topics tagged with `source: 'AI Generator'`\n- Appends new topics to the Topics tab\n\nTopics from this flow go through the same downstream pipeline as Slack-sourced ones \u2014 picked up by the Organic Content Automation workflow on Mon/Wed/Fri at 9am, and aged out by the Daily Cleanup if they go unused for 7 days.\n\n**Bot requirements (for the Slack ingestion flow):**\n- The n8n Slack bot user must be invited to #ai-roundup\n- Slack app needs `channels:history`, `groups:history`, `mpim:history`, `im:history` scopes\n\n**Credentials reused:**\n- Google Sheets BRDGIT\n- Slack n8n Bot\n- Anthropic account 10 (Claude Sonnet 4.5)\n- Tavily account 2\n\n**Sheet:** Topics tab in `YOUR_GOOGLE_SPREADSHEET_ID`\nColumns: `Topic | Last Used | Date Added`",
+        "height": 1140,
+        "width": 760,
+        "color": 5
+      },
+      "id": "sticky-info-001",
+      "name": "Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 3,
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "ai-gen-trigger-001",
+      "name": "AI Topic Generator (Every 3 Days, 9am)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        256,
+        816
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Topics",
+          "cachedResultName": "Topics"
+        },
+        "options": {}
+      },
+      "id": "sheets-read-aigen-001",
+      "name": "Get Existing Topics for AI Gen",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        480,
+        704
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a content strategist for BRDGIT, an AI consulting firm. Your job is to surface 5\u201310 newsletter-worthy topic ideas that BRDGIT's marketing team will turn into LinkedIn thought-leadership posts.\n\nFocus area: the intersection of SOFTWARE DEVELOPMENT and AI CONSULTING. Good topics include:\n- AI tooling in dev workflows (Copilot, Cursor, Claude Code, agentic coding patterns)\n- LLM-powered devtools and how teams are actually using them\n- AI adoption inside engineering orgs (org design, skills, hiring, process)\n- The economics and ROI of AI in software teams\n- Practical AI consulting case studies and recurring patterns\n- Industry shifts (new frameworks, model releases, regulations) and what they mean for dev teams\n- Where AI consulting is going as the technology and the market mature\n\nWhat makes a topic GOOD:\n- SPECIFIC: \"How agentic coding is reshaping code review\" beats \"AI in software development\"\n- HAS AN ANGLE: a point of view worth defending, not a neutral overview\n- NEWSWORTHY OR CURRENT: tied to something happening now, not evergreen platitudes\n- NOT OBVIOUS: avoid takes everyone has already written\n\nWhat makes a topic BAD (do NOT generate these):\n- \"AI is transforming everything\"\n- \"The future of software development\"\n- \"Why companies need AI\"\n- Generic listicles (\"5 ways AI helps developers\")\n- Anything that could have been written two years ago\n\nRESEARCH (required):\nYou have access to the `Search in Tavily (AI Gen)` tool. Call it 2\u20134 times to find what is actually being discussed RIGHT NOW in software dev + AI consulting. Diversify your queries \u2014 don't search for the same theme repeatedly. Useful angles to search for:\n- Recent announcements (new tools, model releases, framework launches)\n- Surprising data or studies about AI adoption in engineering\n- Controversy or healthy disagreement in the dev community\n- Shifts in how engineering teams operate or hire\n\nSynthesize what you learn into topics that feel current and earned, not generic.\n\nOUTPUT:\nReturn ONLY valid JSON with this exact shape (no markdown, no code fences, just raw JSON):\n{\n  \"topics\": [\n    \"First topic as a complete hook or sentence, 8\u201320 words\",\n    \"Second topic\u2026\",\n    \"\u2026\"\n  ]\n}\n\nGenerate between 5 and 10 topics. Each should stand on its own as a possible LinkedIn post hook.",
+        "options": {}
+      },
+      "id": "ai-topic-agent-001",
+      "name": "AI Topic Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        416,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-5-20250929",
+          "cachedResultName": "Claude Sonnet 4.5"
+        },
+        "options": {}
+      },
+      "id": "anthropic-aigen-001",
+      "name": "Anthropic Model (AI Gen)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        352,
+        1136
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic account 10"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "query": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Query', ``, 'string') }}",
+        "options": {}
+      },
+      "id": "tavily-aigen-001",
+      "name": "Search in Tavily (AI Gen)",
+      "type": "@tavily/n8n-nodes-tavily.tavilyTool",
+      "typeVersion": 1,
+      "position": [
+        576,
+        1136
+      ],
+      "credentials": {
+        "tavilyApi": {
+          "id": "YOUR_TAVILY_CREDENTIAL_ID",
+          "name": "Tavily account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI Agent JSON output, dedupe against existing sheet topics, output new ones\nconst raw = $input.first().json.output || $input.first().json.message?.content || $input.first().json.content || $input.first().json;\n\nlet parsed;\ntry {\n  const cleaned = typeof raw === 'string' ? raw.replace(/```json\\n?|```\\n?/g, '').trim() : raw;\n  parsed = typeof cleaned === 'string' ? JSON.parse(cleaned) : cleaned;\n} catch (e) {\n  throw new Error('LLM did not return valid JSON: ' + raw);\n}\n\nconst generated = Array.isArray(parsed) ? parsed : (parsed.topics || []);\nif (!Array.isArray(generated)) {\n  throw new Error('Expected an array of topics in the LLM output, got: ' + JSON.stringify(parsed));\n}\n\n// Build dedup set from existing sheet topics (case-insensitive)\nconst existing = $('Get Existing Topics for AI Gen').all()\n  .map(row => String(row.json['Topic'] || '').trim().toLowerCase())\n  .filter(t => t.length > 0);\nconst seen = new Set(existing);\n\nconst today = new Date().toISOString().split('T')[0];\nconst out = [];\n\nfor (const t of generated) {\n  let topic = String(t || '').trim();\n  if (!topic || topic.length < 10) continue;\n  if (topic.length > 500) topic = topic.substring(0, 497) + '...';\n\n  const key = topic.toLowerCase();\n  if (seen.has(key)) continue;\n  seen.add(key);\n\n  out.push({\n    json: {\n      topic,\n      dateAdded: today,\n      source: 'AI Generator'\n    }\n  });\n}\n\nreturn out;"
+      },
+      "id": "parse-ai-topics-001",
+      "name": "Parse & Dedupe AI Topics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Topics",
+          "cachedResultName": "Topics"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Topic": "={{ $json.topic }}",
+            "Last Used": "",
+            "Date Added": "={{ $json.dateAdded }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Used",
+              "displayName": "Last Used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date Added",
+              "displayName": "Date Added",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "append-ai-topics-001",
+      "name": "Append AI Topics to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        928,
+        928
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Hourly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Topics for Dedup",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Recent Slack Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Slack Messages": {
+      "main": [
+        [
+          {
+            "node": "Format & Dedupe Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format & Dedupe Topics": {
+      "main": [
+        [
+          {
+            "node": "Add Topic to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily at 2am": {
+      "main": [
+        [
+          {
+            "node": "Get All Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Topics": {
+      "main": [
+        [
+          {
+            "node": "Find Expired Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Expired Topics": {
+      "main": [
+        [
+          {
+            "node": "Delete Expired Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Topic Generator (Every 3 Days, 9am)": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Topics for AI Gen",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Topic Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Topic Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse & Dedupe AI Topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Dedupe AI Topics": {
+      "main": [
+        [
+          {
+            "node": "Append AI Topics to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Model (AI Gen)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Topic Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search in Tavily (AI Gen)": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Topic Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "1dd7aa06-1b64-4683-8b49-3d13bd4cfff6",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "430ee6fd30b49b2f1b0c45b73715ac19deaab77bbbd9a9dc04b6b81436ef5492"
+  },
+  "id": "KrI0hPmeMfY6gjBa",
+  "tags": []
+}

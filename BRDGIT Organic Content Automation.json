@@ -1,0 +1,538 @@
+{
+  "name": "BRDGIT Organic Content Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1,3,5"
+            }
+          ]
+        }
+      },
+      "id": "f1f12dcf-f1d5-430f-a208-a58cbd78dff4",
+      "name": "Schedule Trigger (Mon/Wed/Fri 9am)1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        48,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Topics",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "gs-read-topics-001",
+      "name": "Get All Topics (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        256,
+        -48
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter topics from the Topics sheet and pick a RANDOM available one.\n// Sheet columns: Topic | Last Used | Date Added\n// Rules:\n// - Skip topics already used (Last Used not blank)\n// - Skip topics older than 7 days (Date Added > 7 days ago)\n// - Topics with no Date Added (manually added) are always available\n// - Pick randomly among available topics so we don't always run them in sheet order\n\nconst rows = $input.all();\nconst now = new Date();\nconst sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\n\nconst available = rows.filter(row => {\n  const lastUsed = row.json['Last Used'];\n  const dateAdded = row.json['Date Added'];\n\n  // Skip if already used\n  if (lastUsed && String(lastUsed).trim() !== '') return false;\n\n  // Skip if has a date and it's older than 7 days (old news)\n  if (dateAdded && String(dateAdded).trim() !== '') {\n    const addedDate = new Date(dateAdded);\n    if (addedDate < sevenDaysAgo) return false;\n  }\n\n  return true;\n});\n\nif (available.length === 0) {\n  throw new Error('No available topics \u2014 all topics have been used or are older than 7 days. New topics will be added automatically from Slack or the AI Topic Generator sub-workflow.');\n}\n\n// Random pick instead of sheet order\nconst randomIndex = Math.floor(Math.random() * available.length);\nreturn [available[randomIndex]];"
+      },
+      "id": "pick-next-topic-001",
+      "name": "Pick Next Topic",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SPREADSHEET_ID/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Topics",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Topic": "={{ $json.Topic }}",
+            "Last Used": "={{ $now.format('yyyy-MM-dd') }}",
+            "row_number": 0
+          },
+          "matchingColumns": [
+            "Topic"
+          ],
+          "schema": [
+            {
+              "id": "Topic",
+              "displayName": "Topic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Used",
+              "displayName": "Last Used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date Added",
+              "displayName": "Date Added",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "gs-update-topics-001",
+      "name": "Mark Topic Last Used",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        592,
+        -48
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "https://docs.google.com/document/d/1-MX_vC2wShZ7Q50rbYLb7IYV3UaAY3U_mNaTUEO_V0E/edit?tab=t.0#heading=h.n2yz2elv6anj",
+          "mode": "url"
+        },
+        "options": {
+          "googleFileConversion": {
+            "conversion": {
+              "docsToFormat": "text/plain"
+            }
+          }
+        }
+      },
+      "id": "141fee0f-d91a-40ed-9819-08f62a98debc",
+      "name": "Load BRDGIT Tone & Voice Doc1",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        928,
+        -48
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive BRDGIT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "id": "0969dc5f-050e-49dd-9eea-8fe5b0ab9df2",
+      "name": "Extract Tone & Voice Text1",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create one item per platform using the picked topic and tone & voice text.\n// Currently LinkedIn only \u2014 BRDGIT does not have Instagram or Facebook access.\n// To re-enable multi-platform, add platform names to the array below and add\n// matching channel keys in the \"Format Post for HubSpot\" node.\nconst topic = $('Pick Next Topic').first().json.Topic;\nconst toneText = $('Extract Tone & Voice Text1').first().json.data;\n\nconst platforms = ['LinkedIn'];\n\nreturn platforms.map(platform => ({\n  json: {\n    platform,\n    topic,\n    contentType: 'organic_post',\n    toneText\n  }\n}));"
+      },
+      "id": "build-platforms-001",
+      "name": "Build Platform List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are BRDGIT's social media content writer. You MUST write every post strictly following the BRDGIT Tone & Voice guidelines provided below. Match the brand's voice, vocabulary, sentence rhythm, and personality exactly.\n\n--- BRDGIT TONE & VOICE GUIDELINES ---\n{{ $json.toneText }}\n--- END OF GUIDELINES ---\n\nTopic: {{ $json.topic }}\nPlatform: LinkedIn\nContent type: {{ $json.contentType }}\n\nRESEARCH (optional, recommended for time-sensitive topics):\nBefore writing, you may use the `Search in Tavily` tool to gather recent news, statistics, examples, or current context about the topic. Prefer searching when the topic is time-sensitive \u2014 recent AI announcements, industry events, new research, market shifts, current trends. Skip search for evergreen topics that don't depend on current events. Keep queries focused and concrete (3\u201310 words).\n\nNow generate an organic LinkedIn post for BRDGIT.\n\nStyle requirements for LinkedIn:\n- Professional, thought leadership angle\n- 150\u2013300 words\n- NO hashtags \u2014 return an empty hashtags array []\n- Clear hook in the first line, then a substantive body, ending with a CTA\n\nSTRUCTURE (very important \u2014 read carefully):\nThe `headline`, `body`, and `cta` are THREE SEPARATE JSON fields. When the post is rendered for LinkedIn, the system concatenates them with blank lines between like this:\n\n    <headline>\n\n    <body>\n\n    <cta>\n\nRules that follow from this:\n- The `body` field MUST NOT begin with the headline text. Do NOT repeat the headline as the first line/sentence of `body`. Do NOT paraphrase the headline at the top of `body` either.\n- Start `body` with the NEXT substantive sentence \u2014 the one that pivots into the argument, evidence, or perspective. The hook is already the headline.\n- The `cta` MUST be a single line and MUST NOT echo `headline` or `body`.\n- Treat the three fields as distinct sections of a single post, not as overlapping copies.\n\nCOMPETITOR PROTECTION (critical \u2014 takes priority over the linking rules below):\nBRDGIT is an AI consulting firm. The post must NEVER drive readers toward services or tools that could REPLACE BRDGIT. Do not include `sourceUrl` if it would point to:\n\n- Other AI/digital consultancies \u2014 McKinsey AI, Accenture, Deloitte Digital, EY, KPMG, BCG, Slalom, Bain Digital, ThoughtWorks AI practice, boutique AI consultancies, \"fractional AI officer\" services, etc.\n- AI-powered platforms positioned as a substitute for human consulting \u2014 \"AI strategy in a box,\" no-code AI deployment platforms pitched as replacing consultants\n- Vendor sites that pitch advisory or implementation services BRDGIT also offers\n\nAlso reflect this in the body: the post should make BRDGIT feel like the right place to get help on the topic, not direct readers elsewhere for the same outcome. If a competitor MUST be referenced to make a point land (e.g. citing their public research), reference them in the body WITHOUT a link, treating them as a data point rather than a destination.\n\nDecision rule before including any URL: \"Would a reader who clicks this link find a service that could replace BRDGIT?\" If yes \u2014 do NOT include the link. Set `sourceUrl: null` and, if needed, rewrite the angle so the post stands on its own.\n\nLINKING RULES (apply only AFTER passing the competitor check above):\n- If the post references a SPECIFIC external company, product launch, recent news event, partnership, or study \u2014 and that source is not a competitor \u2014 include the canonical source URL in the `sourceUrl` field. Use a URL you actually saw in your Tavily search results. NEVER invent, guess, or hallucinate a URL.\n- If the post is purely BRDGIT's own opinion or perspective on a topic \u2014 set `sourceUrl` to null. No link needed.\n- Safe to link: foundation model labs and their official announcements (Anthropic, OpenAI, Google DeepMind, Meta AI), neutral research outlets (Stanford HAI, MIT Technology Review, ArXiv, IEEE), mainstream journalism (NYT, WSJ, Reuters, The Information, TechCrunch, Bloomberg, Wired), product news for developer tools when the topic is the tool itself, open-source projects and framework docs.\n\nReturn ONLY valid JSON with this exact shape (no markdown, no code fences, just raw JSON):\n{\n  \"platform\": \"LinkedIn\",\n  \"topic\": \"{{ $json.topic }}\",\n  \"headline\": \"short hook (max 80 chars)\",\n  \"body\": \"the full post body \u2014 do NOT start with the headline; pivot directly into substance\",\n  \"hashtags\": [],\n  \"cta\": \"one-line call to action, distinct from body and headline\",\n  \"sourceUrl\": \"https://\u2026 (canonical link if referencing external news / company / study AND it is NOT a competitor), or null otherwise\",\n  \"suggested_image_prompt\": \"a descriptive image prompt that fits this post\"\n}",
+        "needsFallback": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1552,
+        -48
+      ],
+      "id": "7c460a72-ce40-401a-8efa-9274408c7a5f",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "claude-sonnet-4-5-20250929",
+          "cachedResultName": "Claude Sonnet 4.5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        1408,
+        192
+      ],
+      "id": "2a19c032-94fd-4462-92f0-415d2af293e2",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "YOUR_ANTHROPIC_CREDENTIAL_ID",
+          "name": "Anthropic account 10"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse LLM output and build the HubSpot draft payload for LinkedIn.\n// LinkedIn-only \u2014 BRDGIT does not have Instagram or Facebook access at this time.\n// Defensive dedup: some LLM outputs repeat the headline at the top of the body,\n// which would cause the final caption to print the headline twice. We detect\n// and strip that case before concatenating.\nconst raw = $input.first().json.output || $input.first().json.message?.content || $input.first().json.content || $input.first().json;\n\nlet post;\ntry {\n  const cleaned = typeof raw === 'string' ? raw.replace(/```json\\n?|```\\n?/g, '').trim() : raw;\n  post = typeof cleaned === 'string' ? JSON.parse(cleaned) : cleaned;\n} catch (e) {\n  throw new Error('LLM did not return valid JSON: ' + raw);\n}\n\n// HubSpot LinkedIn channel key (from HubSpot \u2192 Settings \u2192 Social \u2192 Connected Accounts)\nconst channelKey = 'LinkedInCompanyPage:108300227';\n\nconst headline = String(post.headline || '').trim();\nlet body = String(post.body || '').trim();\nconst cta = String(post.cta || '').trim();\n\n// Defensive dedup #1: body starts with the headline (case-insensitive) \u2014 strip it.\n// Also handles a trailing period/dash/etc plus whitespace/newlines.\nif (headline && body.toLowerCase().startsWith(headline.toLowerCase())) {\n  body = body.substring(headline.length).replace(/^[\\s.,;:\\-\u2014\u2013\\n]+/, '').trim();\n}\n\n// Defensive dedup #2: cta is identical to (or contained in) the body \u2014 don't double-print.\n// Only strip cta from body if the body literally ends with the cta text.\nif (cta && body.toLowerCase().endsWith(cta.toLowerCase())) {\n  body = body.substring(0, body.length - cta.length).replace(/[\\s.,;:\\-\u2014\u2013\\n]+$/, '').trim();\n}\n\n// Build the caption: headline + body + CTA, plus the source URL if present + valid\nconst parts = [headline, body, cta].filter(Boolean);\n\nconst rawUrl = typeof post.sourceUrl === 'string' ? post.sourceUrl.trim() : '';\nconst hasValidUrl = rawUrl && /^https?:\\/\\//i.test(rawUrl);\nif (hasValidUrl) {\n  parts.push(rawUrl);\n}\n\nconst fullCaption = parts.join('\\n\\n').trim();\n\nreturn [{\n  json: {\n    headline,\n    body,\n    hashtags: post.hashtags,\n    cta,\n    sourceUrl: hasValidUrl ? rawUrl : null,\n    suggested_image_prompt: post.suggested_image_prompt,\n    fullCaption,\n    platform: 'LinkedIn',\n    topic: post.topic,\n    channelKey\n  }\n}];"
+      },
+      "id": "89168f99-5f7b-455e-8376-270c534700a1",
+      "name": "Format Post for HubSpot1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.hubspot.com/broadcast/v1/broadcasts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"channelKey\": {{ JSON.stringify($json.channelKey) }},\n  \"triggerAt\": null,\n  \"status\": \"DRAFT\",\n  \"content\": {\n    \"body\": {{ JSON.stringify($json.fullCaption) }}\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "72ff27b5-a4ad-446a-96e6-d5805c4514f5",
+      "name": "Create HubSpot Social Draft (Awaits Approval)1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2096,
+        -48
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_HUBSPOT_CREDENTIAL_ID",
+          "name": "HubSpot Social Media Access"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "jl2@tsl.io, ml@tsl.io, cl@tsl.io",
+        "subject": "New BRDGIT LinkedIn draft ready for review",
+        "message": "=A new LinkedIn post draft is ready for your review in HubSpot Social.\n\nReview and approve it here: https://app.hubspot.com/social/3838537/manage/draft",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2304,
+        -48
+      ],
+      "id": "3811b750-985e-4bb3-9ed3-2e6ff4fbae12",
+      "name": "Send a message1",
+      "webhookId": "2386ee87-ddef-4172-a12f-b3d603e1b3d2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## BRDGIT Organic Content Automation\n\n**Flow:**\n1. Scheduled trigger (Mon/Wed/Fri 9am)\n2. Get ALL topics from Google Sheets\n3. Pick next available topic (blank Last Used AND added within last 7 days)\n4. Mark that topic's Last Used = today\n5. Load BRDGIT Tone & Voice doc + extract text\n6. Build platform list (LinkedIn only)\n7. AI Agent writes a LinkedIn-tailored post\n8. Format Post for HubSpot\n9. Create DRAFT post in HubSpot Social\n10. Gmail notification to approver\n\n**Google Sheets \u2014 Topics tab structure:**\n| Topic | Date Added | Last Used |\n|-------|------------|-----------|\n| Your topic here | 2026-01-15 | (blank = never used, auto-filled on run) |\n\nTopics are sourced automatically from Slack #ai-roundup (Jarvis bot) via the BRDGIT \u2014 Slack Topics to Google Sheets workflow (hourly polling).\nTopics older than 7 days are auto-deleted by the Slack \u2192 Sheets workflow.\n\n**Platforms:**\n\u2705 LinkedIn (active)\n\u274c Instagram \u2014 removed (no account access)\n\u274c Facebook \u2014 removed (no account access)\n\nTo re-enable a platform later: add its name to the platforms array in \"Build Platform List\", add the HubSpot channel key in \"Format Post for HubSpot\", and update the AI Agent prompt to handle that platform's style rules.\n\n**HubSpot:** LinkedIn channel key set \u2014 `LinkedInCompanyPage:108300227` \u2705\n**Email:** Gmail OAuth2 \u2014 sendTo currently jl2@tsl.io \u2705\n**Topics:** Auto-fed from Slack #ai-roundup \u2705\n",
+        "height": 828,
+        "width": 864,
+        "color": 5
+      },
+      "id": "c87ea89c-f6e3-418c-b06c-e393f55ab1d9",
+      "name": "Notes1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -720,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1552,
+        176
+      ],
+      "id": "39285f5e-8b15-457c-8f46-dcc17f2be2df",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAi account 24"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger (Mon/Wed/Fri 9am)1": {
+      "main": [
+        [
+          {
+            "node": "Get All Topics (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Topics (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Pick Next Topic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick Next Topic": {
+      "main": [
+        [
+          {
+            "node": "Mark Topic Last Used",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Topic Last Used": {
+      "main": [
+        [
+          {
+            "node": "Load BRDGIT Tone & Voice Doc1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load BRDGIT Tone & Voice Doc1": {
+      "main": [
+        [
+          {
+            "node": "Extract Tone & Voice Text1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Tone & Voice Text1": {
+      "main": [
+        [
+          {
+            "node": "Build Platform List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Platform List": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Format Post for HubSpot1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Post for HubSpot1": {
+      "main": [
+        [
+          {
+            "node": "Create HubSpot Social Draft (Awaits Approval)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HubSpot Social Draft (Awaits Approval)1": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "timezone": "America/New_York"
+  },
+  "versionId": "2922295e-ff6c-46a6-9ee8-fbfbc0555413",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "430ee6fd30b49b2f1b0c45b73715ac19deaab77bbbd9a9dc04b6b81436ef5492"
+  },
+  "id": "6_XxBhVkokOf9OpqHtqvZ",
+  "tags": [
+    {
+      "updatedAt": "2026-04-24T14:00:40.770Z",
+      "createdAt": "2026-04-24T14:00:40.770Z",
+      "id": "aM3JDHBAFchkzaiJ",
+      "name": "BRDGIT"
+    },
+    {
+      "updatedAt": "2026-04-24T14:00:40.788Z",
+      "createdAt": "2026-04-24T14:00:40.788Z",
+      "id": "iLlmugJCeIlFktRE",
+      "name": "Organic Content"
+    },
+    {
+      "updatedAt": "2026-04-24T14:00:40.779Z",
+      "createdAt": "2026-04-24T14:00:40.779Z",
+      "id": "oF0NiKJKV0UHQLYb",
+      "name": "Social Media"
+    }
+  ]
+}
