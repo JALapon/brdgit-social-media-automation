@@ -93,11 +93,12 @@ The Topics spreadsheet needs a sheet named **Topics** with these columns:
 ```
 ├── BRDGIT Organic Content Automation.json   # Main content generation workflow
 ├── BRDGIT — Slack Topics to Google Sheets.json  # Topic harvesting workflow
-├── BRDGIT Tone & Voice.docx                 # Brand voice guidelines (referenced by workflow)
 ├── BRDGIT Ads Automation.pdf                # Ads automation documentation
 ├── Campaign automation workflow roadmap.docx # Project roadmap
 └── README.md
 ```
+
+> Note: The BRDGIT Tone & Voice doc referenced by the content workflow is kept private and isn't included in this repo.
 
 ---
 
