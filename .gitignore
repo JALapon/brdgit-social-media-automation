@@ -1,0 +1,15 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# n8n local exports / credentials
+.env
+*.n8n
+credentials.json
+
+# Logs
+*.log
